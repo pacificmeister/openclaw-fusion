@@ -91,24 +91,39 @@ openclaw-fusion uses a **closed-loop visual verification system**:
 
 This means the agent catches errors in real-time instead of discovering them 10 operations later. It can work on complex real-world models (not just "Hello World" boxes) because it actually sees what it's doing.
 
-### Cost vs. Accuracy Tradeoff
+### Two-Tier Vision System
 
-Visual verification adds ~2-3K tokens per check. For a typical 20-operation design session, that's ~30-50K tokens on vision — roughly $0.50-1.50 at current rates. The alternative (blind iteration, debugging compound failures) costs far more in wasted operations and human time.
+| Check Type | Model | Cost | When |
+|-----------|-------|------|------|
+| **Quick check** | Gemini Flash | ~$0.001 | After EVERY geometry operation |
+| **Detailed review** | Main model (Opus/Sonnet) | ~$0.03 | Before presenting to user, complex analysis |
 
-Routine visual checks use cheap/fast models (Gemini Flash). Complex interpretation escalates to the main model.
+Quick checks use a simple prompt: *"I just [operation]. Expected [result]. Is the change visible? Right place? Right direction?"*
+
+**Real-world impact:** In the iPhone 15 Pro test build, skipping quick checks led to 3-5 attempts per feature (speaker holes, USB-C port, camera lenses). With quick checks, each would have been caught on attempt #1. The cost of 50 quick checks ($0.05) is negligible compared to the cost of blind debugging (5× more API calls, 10× more tokens).
+
+### Lessons from the iPhone Build
+
+The first test model (iPhone 15 Pro, built entirely by AI) revealed critical failure patterns:
+
+1. **Sketch plane orientation** — The #1 source of bugs. XZ plane offset in -Y flips the Z axis. The skill now includes a mandatory direction lookup table.
+2. **Extrude direction** — Default direction often goes away from the target body. Always verify with bounding box overlap check before boolean operations.
+3. **Through-holes must extend past the surface** — Holes that start inside the body are blind (invisible). Tool bodies must start outside and punch through.
+4. **API "success" ≠ visible result** — A boolean cut can succeed with 0.1mm overlap that's invisible. Visual check catches this immediately.
 
 ## Project Structure
 
 ```
 openclaw-fusion/
-├── SKILL.md                      # Main skill definition (loaded by OpenClaw)
-├── README.md                     # This file
-├── LICENSE                       # MIT
+├── SKILL.md                        # Main skill definition (loaded by OpenClaw)
+├── README.md                       # This file
+├── LICENSE                         # MIT
 ├── references/
-│   ├── operations.md             # Fusion API patterns & code snippets
-│   └── visual-feedback.md        # Visual verification protocol & camera presets
+│   ├── operations.md               # Fusion API patterns & code snippets
+│   ├── visual-feedback.md          # Camera presets & section view patterns
+│   └── verification-checklist.md   # Mandatory verification steps & failure catalog
 └── scripts/
-    └── fusion-screenshot.sh      # Screenshot capture utility (macOS)
+    └── fusion-screenshot.sh        # Screenshot capture utility (macOS)
 ```
 
 ## License

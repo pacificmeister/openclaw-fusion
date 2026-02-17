@@ -65,73 +65,114 @@ Always call `get_best_practices` on first use and `get_api_documentation` when u
 
 ## Core Workflow: Execute → Verify → Iterate
 
-**NEVER trust API return values alone.** A "successful" boolean cut can produce invisible results if coordinates are wrong. Visual verification is mandatory.
+**NEVER trust API return values alone.** Visual verification after every geometry operation is mandatory, not optional.
 
-### Verification Protocol
+### The Verification Loop
 
-After every geometry-changing operation (extrude, cut, boolean, fillet, pattern, etc.):
+Every geometry-changing operation follows this exact sequence:
 
-1. **Set camera** to the modified area (zoom to ~3× feature size)
+1. **Zoom camera** to the target area BEFORE executing (~3× feature size)
 2. **Execute** the Fusion operation
-3. **API check** — did it error? Check volume change.
-4. **Screenshot** the viewport
-5. **Section view** (if internal geometry) — create temp section plane, screenshot, delete plane
-6. **Vision analysis** — send screenshot to image model with expected result description
-7. **Pass/fail** — if visual doesn't match, undo and retry
+3. **Screenshot** the viewport immediately
+4. **Quick vision check** — send screenshot to a **cheap/fast model** (Gemini Flash, ~$0.001/check)
+5. **Pass/fail** — if the check fails, undo and fix immediately. Do NOT proceed.
 
-### When to Screenshot
-
-| Tier | Operations | Method |
-|------|-----------|--------|
-| **Always** | Boolean cut/join/intersect, extrude, revolve, fillet, chamfer, shell, pattern | Screenshot + section if internal |
-| **Spot-check** | Sketch creation, construction geometry, component activation | Screenshot before committing dependent operation |
-| **Skip** | Model tree reads, measurements, camera moves, store_as, doc lookups | No screenshot needed |
-
-### Vision Analysis
-
-Use the `image` tool for verification. Cheap/fast models (Gemini) work for routine checks. Prompt pattern:
-
+Use this exact prompt format for quick checks:
 ```
-Look at this Fusion 360 screenshot. I just [operation].
-Expected: [what should be visible].
-Does the geometry match? Any issues?
+I just [OPERATION] in Fusion 360.
+Expected: [WHAT SHOULD BE VISIBLE]
+Location: [WHERE ON THE MODEL]
+Check: Is the change visible? Is it in the right place? Right direction?
 ```
 
-For before/after comparison, send both images:
-```
-Compare these two views. What changed? Does it match: [expected change]?
+Use `model="google/gemini-2.0-flash"` (or equivalent cheap model) for routine checks.
+Reserve the main model for design decisions and complex analysis only.
+
+**Cost:** ~$0.001 per check. 50 checks per session = $0.05. This is essentially free compared to the cost of blind debugging (which wastes 3-5× more API calls fixing compounded errors).
+
+### Pre-Operation Checks
+
+Before creating geometry, verify:
+1. **Which body** am I modifying? (confirm it exists)
+2. **Which sketch plane?** (XY/XZ/YZ — see direction table below)
+3. **Which direction** will the extrude go?
+4. **Will the tool body overlap the target?** (bounding box check for booleans)
+
+### Sketch Plane Direction Table
+
+This is the #1 source of errors. Memorize or reference before every sketch:
+
+| Sketch Plane | Sketch X → | Sketch Y → | Extrude → |
+|-------------|------------|------------|-----------|
+| XY (offset in Z) | Model X | Model Y | ±Z |
+| XZ (offset in Y) | Model X | Model Z | ±Y |
+| YZ (offset in X) | Model Y | Model Z | ±X |
+
+**⚠️ Offset planes can FLIP axes!** XZ plane offset in -Y flips sketch Y → -Z. Always verify with bounding box after first extrude.
+
+### Boolean Pre-Check
+
+Before any boolean cut, verify tool/target overlap:
+```python
+t_bb = tool_body.boundingBox
+b_bb = target_body.boundingBox
+overlap = (t_bb.maxPoint.x > b_bb.minPoint.x and t_bb.minPoint.x < b_bb.maxPoint.x and
+           t_bb.maxPoint.y > b_bb.minPoint.y and t_bb.minPoint.y < b_bb.maxPoint.y and
+           t_bb.maxPoint.z > b_bb.minPoint.z and t_bb.minPoint.z < b_bb.maxPoint.z)
+if not overlap:
+    print("WARNING: No overlap — boolean will fail!")
 ```
 
 ### Section Views for Internal Geometry
 
-Boolean cuts, pockets, bore holes — anything that removes material inside a body — are often invisible from outside. Always verify with a section:
+Cuts, pockets, bore holes — anything inside a body — need a section view to verify:
 
 ```python
-# Create temp section at cut location
 planes = rootComponent.constructionPlanes
 inp = planes.createInput()
 inp.setByOffset(rootComponent.xYConstructionPlane, adsk.core.ValueInput.createByReal(offset_cm))
 plane = planes.add(inp)
 section = rootComponent.analyses.createSectionAnalysis(plane)
-# ... screenshot here ...
+# ... screenshot + verify ...
 section.deleteMe()
 plane.deleteMe()
 ```
 
-### Camera Control for Targeted Views
+### Camera Control
 
 ```python
 cam = app.activeViewport.camera
 cam.eye = adsk.core.Point3D.create(ex, ey, ez)
 cam.target = adsk.core.Point3D.create(tx, ty, tz)
 cam.upVector = adsk.core.Vector3D.create(0, 0, 1)
-cam.viewExtents = 5.0  # cm — set to ~3× feature size
+cam.viewExtents = 5.0  # cm — ~3× feature size
 cam.isSmoothTransition = False
 app.activeViewport.camera = cam
 app.activeViewport.refresh()
 ```
 
-Load `references/visual-feedback.md` for full camera presets, section view patterns, and cost optimization strategies.
+### Screenshot Helper
+
+Combine camera + screenshot + viewport save in one Fusion call:
+```python
+# Zoom to area, screenshot, return path
+cam = app.activeViewport.camera
+cam.eye = adsk.core.Point3D.create(ex, ey, ez)
+cam.target = adsk.core.Point3D.create(tx, ty, tz)
+cam.upVector = adsk.core.Vector3D.create(0, 0, 1)
+cam.viewExtents = extent
+cam.isSmoothTransition = False
+app.activeViewport.camera = cam
+app.activeViewport.refresh()
+path = '/tmp/fusion-verify.png'
+app.activeViewport.saveAsImageFile(path, 1920, 1080)
+print(f'SCREENSHOT:{path}')
+```
+
+Then: `cp /tmp/fusion-verify.png ~/clawd/fusion-verify.png` and use `image` tool with cheap model.
+
+Load `references/verification-checklist.md` for the full checklist with failure examples from real builds.
+Load `references/visual-feedback.md` for camera presets and section view patterns.
 
 ## Common Operations Reference
 
