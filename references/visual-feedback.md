@@ -6,6 +6,8 @@ API return values lie. A boolean cut can "succeed" (no error) but produce invisi
 
 The hinge design lesson: trusting volume deltas ("2156 → 2136 cm³, must have worked!") without looking caused three failed iterations. A single screenshot after the first cut would have caught the Z-coordinate error immediately.
 
+The iPhone build lesson: speaker holes took 5 attempts because each was debugged with bounding box numbers instead of screenshots. Camera lenses overlapped, buttons protruded instead of recessing, holes ended up outside the body. Every single failure would have been caught on attempt #1 by a $0.001 Gemini Flash check.
+
 ## Verification Tiers
 
 ### Tier 1: Always Verify (every geometry-changing operation)
@@ -177,16 +179,27 @@ def zoom_to_point(viewport, x, y, z, radius_cm=5):
 
 ## Cost Optimization
 
-### Use Cheap Models for Routine Checks
-Routine "did the cut show up?" checks don't need Opus-level intelligence. Use Gemini Flash or similar for:
-- Binary yes/no geometry checks
-- "Did anything change?" comparisons
-- Location verification
+### Two-Tier Vision Model System
 
-Escalate to the main model when:
-- The check reveals something unexpected
-- Complex geometry interpretation is needed
-- Design decisions must be made based on visual
+| Check Type | Model | Cost/check | Use For |
+|-----------|-------|-----------|---------|
+| Quick check | Gemini Flash (`google/gemini-2.0-flash`) | ~$0.001 | Every geometry operation |
+| Detailed review | Main model (Opus/Sonnet) | ~$0.03 | Before user presentation, complex analysis |
+
+**Quick check prompt template:**
+```
+I just [OPERATION] in Fusion 360.
+Expected: [WHAT SHOULD BE VISIBLE]
+Location: [WHERE ON THE MODEL]
+Check: Is the change visible? Is it in the right place? Right direction?
+```
+
+**Real-world results:** In the iPhone build, Gemini Flash correctly identified:
+- "Buttons are protruding, not recessed" → caught direction error
+- "Recesses are too square, need to be elongated" → caught proportion error
+- "Speaker holes appear as rectangles, not circles" → caught sketch plane error
+
+Each check: 2 seconds, $0.001. vs. debugging blind: 5+ attempts, 10× more tokens.
 
 ### Batch Operations Before Verifying
 For a sequence of related operations (e.g., create sketch → add constraints → extrude), you can batch:
@@ -196,9 +209,6 @@ For a sequence of related operations (e.g., create sketch → add constraints �
 4. **Verify once** after the extrude (not after each sketch line)
 
 But for independent operations on different bodies/locations, verify each one.
-
-### Skip Redundant Screenshots
-If you just took a screenshot and the next operation is on a completely different part of the model, the old screenshot has no value for comparison. Only keep the most recent relevant view.
 
 ## The Verification Protocol
 
