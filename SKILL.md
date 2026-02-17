@@ -63,14 +63,75 @@ Full access to `adsk.core`, `adsk.fusion`, `adsk.cam`. Use `print()` for return 
 
 Always call `get_best_practices` on first use and `get_api_documentation` when unsure of API.
 
-## Core Workflow: Execute → Screenshot → Evaluate → Iterate
+## Core Workflow: Execute → Verify → Iterate
 
-1. **Execute** operation via mcporter call
-2. **Screenshot** the viewport — use `get_viewport_image` or take screenshot via node/browser
-3. **Evaluate** the result visually — check geometry, dimensions, alignment
-4. **Iterate** — fix issues, refine, repeat
+**NEVER trust API return values alone.** A "successful" boolean cut can produce invisible results if coordinates are wrong. Visual verification is mandatory.
 
-This feedback loop is essential. Never assume an operation succeeded without visual confirmation.
+### Verification Protocol
+
+After every geometry-changing operation (extrude, cut, boolean, fillet, pattern, etc.):
+
+1. **Set camera** to the modified area (zoom to ~3× feature size)
+2. **Execute** the Fusion operation
+3. **API check** — did it error? Check volume change.
+4. **Screenshot** the viewport
+5. **Section view** (if internal geometry) — create temp section plane, screenshot, delete plane
+6. **Vision analysis** — send screenshot to image model with expected result description
+7. **Pass/fail** — if visual doesn't match, undo and retry
+
+### When to Screenshot
+
+| Tier | Operations | Method |
+|------|-----------|--------|
+| **Always** | Boolean cut/join/intersect, extrude, revolve, fillet, chamfer, shell, pattern | Screenshot + section if internal |
+| **Spot-check** | Sketch creation, construction geometry, component activation | Screenshot before committing dependent operation |
+| **Skip** | Model tree reads, measurements, camera moves, store_as, doc lookups | No screenshot needed |
+
+### Vision Analysis
+
+Use the `image` tool for verification. Cheap/fast models (Gemini) work for routine checks. Prompt pattern:
+
+```
+Look at this Fusion 360 screenshot. I just [operation].
+Expected: [what should be visible].
+Does the geometry match? Any issues?
+```
+
+For before/after comparison, send both images:
+```
+Compare these two views. What changed? Does it match: [expected change]?
+```
+
+### Section Views for Internal Geometry
+
+Boolean cuts, pockets, bore holes — anything that removes material inside a body — are often invisible from outside. Always verify with a section:
+
+```python
+# Create temp section at cut location
+planes = rootComponent.constructionPlanes
+inp = planes.createInput()
+inp.setByOffset(rootComponent.xYConstructionPlane, adsk.core.ValueInput.createByReal(offset_cm))
+plane = planes.add(inp)
+section = rootComponent.analyses.createSectionAnalysis(plane)
+# ... screenshot here ...
+section.deleteMe()
+plane.deleteMe()
+```
+
+### Camera Control for Targeted Views
+
+```python
+cam = app.activeViewport.camera
+cam.eye = adsk.core.Point3D.create(ex, ey, ez)
+cam.target = adsk.core.Point3D.create(tx, ty, tz)
+cam.upVector = adsk.core.Vector3D.create(0, 0, 1)
+cam.viewExtents = 5.0  # cm — set to ~3× feature size
+cam.isSmoothTransition = False
+app.activeViewport.camera = cam
+app.activeViewport.refresh()
+```
+
+Load `references/visual-feedback.md` for full camera presets, section view patterns, and cost optimization strategies.
 
 ## Common Operations Reference
 

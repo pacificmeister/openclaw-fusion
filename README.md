@@ -75,7 +75,41 @@ The skill teaches your OpenClaw agent three execution modes:
 2. **Python Execution** — Full Python with `adsk.*` access for complex workflows
 3. **Documentation Lookup** — Query Fusion API docs when unsure
 
-The critical workflow is **Execute → Screenshot → Evaluate → Iterate**. The agent always visually verifies results.
+The critical workflow is **Execute → Verify → Iterate**. The agent visually verifies every geometry change.
+
+## Visual Feedback Loop — What Makes This Different
+
+Most Fusion 360 MCP integrations are "fire and forget" — they send commands and trust the API response. That doesn't work for real engineering. A boolean cut can "succeed" with wrong coordinates and produce invisible changes.
+
+openclaw-fusion uses a **closed-loop visual verification system**:
+
+1. **Camera positioning** — zoom to the area being modified
+2. **Execute** the operation
+3. **Screenshot** the viewport (+ section view for internal geometry)
+4. **Vision analysis** — AI examines the screenshot to confirm the change matches intent
+5. **Auto-retry** — if visual doesn't match, undo and adjust
+
+This means the agent catches errors in real-time instead of discovering them 10 operations later. It can work on complex real-world models (not just "Hello World" boxes) because it actually sees what it's doing.
+
+### Cost vs. Accuracy Tradeoff
+
+Visual verification adds ~2-3K tokens per check. For a typical 20-operation design session, that's ~30-50K tokens on vision — roughly $0.50-1.50 at current rates. The alternative (blind iteration, debugging compound failures) costs far more in wasted operations and human time.
+
+Routine visual checks use cheap/fast models (Gemini Flash). Complex interpretation escalates to the main model.
+
+## Project Structure
+
+```
+openclaw-fusion/
+├── SKILL.md                      # Main skill definition (loaded by OpenClaw)
+├── README.md                     # This file
+├── LICENSE                       # MIT
+├── references/
+│   ├── operations.md             # Fusion API patterns & code snippets
+│   └── visual-feedback.md        # Visual verification protocol & camera presets
+└── scripts/
+    └── fusion-screenshot.sh      # Screenshot capture utility (macOS)
+```
 
 ## License
 

@@ -314,22 +314,75 @@ for face in body.faces:
     print(f"Face area: {face.area:.4f} cm²")
 ```
 
-## Viewport
+## Viewport & Visual Verification
 
-### Get viewport image (if supported by add-in version)
-```json
-{"operation": "execute_python", "code": "app.activeViewport.saveAsImageFile('/tmp/fusion_viewport.png', 1920, 1080)\nprint('Saved viewport image')"}
+### Save Viewport Image
+```python
+app.activeViewport.saveAsImageFile('/tmp/fusion_viewport.png', 1920, 1080)
 ```
 
-### Camera control
+### Fit to View
+```python
+app.activeViewport.fit()
+```
+
+### Camera Control — Zoom to Feature
 ```python
 cam = app.activeViewport.camera
-cam.isFitView = True
+cam.eye = adsk.core.Point3D.create(ex, ey, ez)      # camera position
+cam.target = adsk.core.Point3D.create(tx, ty, tz)    # look-at point
+cam.upVector = adsk.core.Vector3D.create(0, 0, 1)
+cam.viewExtents = 5.0  # field of view in cm (~3× feature size)
+cam.isSmoothTransition = False
 app.activeViewport.camera = cam
 app.activeViewport.refresh()
 ```
 
-### Fit to view
+### Section Analysis (for verifying internal cuts)
 ```python
-app.activeViewport.fit()
+# Create temporary section plane + analysis
+planes = rootComponent.constructionPlanes
+inp = planes.createInput()
+inp.setByOffset(
+    rootComponent.xYConstructionPlane,
+    adsk.core.ValueInput.createByReal(offset_cm)
+)
+section_plane = planes.add(inp)
+section = rootComponent.analyses.createSectionAnalysis(section_plane)
+
+# ... take screenshot and verify ...
+
+# Clean up
+section.deleteMe()
+section_plane.deleteMe()
 ```
+
+### Standard Views
+```python
+def set_view(viewport, eye, target, up=(0,0,1), extent=30):
+    cam = viewport.camera
+    cam.eye = adsk.core.Point3D.create(*eye)
+    cam.target = adsk.core.Point3D.create(*target)
+    cam.upVector = adsk.core.Vector3D.create(*up)
+    cam.viewExtents = extent
+    cam.isSmoothTransition = False
+    viewport.camera = cam
+    viewport.refresh()
+
+# Front view (looking along -Y)
+set_view(vp, (0, 50, 0), (0, 0, 0), (0, 0, 1), 30)
+
+# Top view (looking along -Z)
+set_view(vp, (0, 0, 50), (0, 0, 0), (0, 1, 0), 30)
+
+# Isometric
+set_view(vp, (20, 20, 20), (0, 0, 0), (0, 0, 1), 30)
+```
+
+### Verification After Boolean/Cut Operations
+Always verify cuts visually — API "success" doesn't guarantee visible results.
+
+1. Set camera to zoom into the cut area (`viewExtents` ≈ 3× cut radius)
+2. Take screenshot → analyze with vision model
+3. If cut is internal, also create a section analysis through the cut center
+4. Compare pre/post body volume as secondary check
